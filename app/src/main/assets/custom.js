@@ -1304,6 +1304,98 @@ if (window.__PAKE_VIDEO_INIT__) {
         }
     })();
 }
+// ========== 【新增】右上角实时流量显示（KB/s） ==========
+(function addTrafficDisplay() {
+    const video = document.querySelector('video');
+    if (!video) return;
+
+    // 创建显示元素
+    const trafficEl = document.createElement('div');
+    trafficEl.id = 'pake-traffic-display';
+    trafficEl.style.cssText = `
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        font-size: 12px;
+        padding: 4px 8px;
+        border-radius: 4px;
+        z-index: 9999;
+        pointer-events: none;
+        font-family: Arial, sans-serif;
+        display: none; /* 初始隐藏，有数据再显示 */
+    `;
+    document.body.appendChild(trafficEl);
+
+    let lastBufferEnd = 0;
+    let lastTimeMs = performance.now();
+    let lastBytes = 0;
+
+    function updateTraffic() {
+        if (video.readyState < 2) return; // 至少要有 metadata
+
+        // 获取当前缓冲区末端（取最后一个区间）
+        const buffered = video.buffered;
+        if (buffered.length === 0) return;
+
+        const currentBufferEnd = buffered.end(buffered.length - 1);
+        const currentTime = video.currentTime;
+
+        // 估算已加载字节数：假设视频是恒定码率（简化模型）
+        // 更准确的方式需服务器提供 Content-Length，但 HLS/FLV 通常无
+        // 此处用“缓冲增长量”近似带宽
+        const duration = video.duration || Infinity;
+        if (duration <= 0 || !isFinite(duration)) return;
+
+        // 视频总大小未知，但我们关心的是“缓冲增长速度”
+        // 所以只计算 bufferEnd 的变化速率（单位：秒/秒），再乘以预估码率？
+        // 更简单：记录两次 bufferEnd 差值，除以时间差 → 得到“缓冲填充速度”（秒/秒）
+        // 但我们要 KB/s，所以需要知道码率！
+
+        // 替代方案：如果能拿到视频尺寸（如 MP4），可尝试从 meta 推断
+        // 但通用性差。因此我们采用“缓冲长度增长量”作为相对指标，并假设平均码率 ～2Mbps（常见值）
+        // 注意：这是估算！仅用于 UI 反馈，非精确值。
+
+        const now = performance.now();
+        const timeDiffSec = (now - lastTimeMs) / 1000;
+        if (timeDiffSec < 0.5) return; // 至少间隔 500ms
+
+        const bufferGrowthSec = currentBufferEnd - lastBufferEnd;
+        if (bufferGrowthSec <= 0) {
+            lastBufferEnd = currentBufferEnd;
+            lastTimeMs = now;
+            trafficEl.textContent = '0 KB/s';
+            trafficEl.style.display = 'block';
+            return;
+        }
+
+        // 假设平均码率为 2 Mbps（可根据实际情况调整，或从 hls/flv 获取）
+        // 2 Mbps = 256 KB/s
+        const assumedBitrateKBps = 256; // 可调整
+        const estimatedKB = bufferGrowthSec * assumedBitrateKBps;
+        const kbps = estimatedKB / timeDiffSec;
+        const kbPerSec = Math.round(kbps);
+
+        trafficEl.textContent = `${kbPerSec} KB/s`;
+        trafficEl.style.display = 'block';
+
+        // 更新记录
+        lastBufferEnd = currentBufferEnd;
+        lastTimeMs = now;
+    }
+
+    // 每 1 秒更新一次
+    setInterval(updateTraffic, 1000);
+
+    // 初始触发一次
+    setTimeout(() => {
+        trafficEl.style.display = 'block';
+        trafficEl.textContent = '-- KB/s';
+    }, 1000);
+
+    log('流量显示', '已启用右上角实时流量监控（估算值）');
+})();
   </script>
 </body>
 </html>
